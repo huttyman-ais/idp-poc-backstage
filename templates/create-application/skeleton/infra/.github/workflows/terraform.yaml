@@ -60,7 +60,7 @@ jobs:
 
   apply:
     needs: plan
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     environment: dev # GitHub Environment — add required reviewers here for staging/prod (see roadmap)
     env:
