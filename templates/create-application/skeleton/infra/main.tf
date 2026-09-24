@@ -41,10 +41,12 @@ module "container_apps" {
   ghcr_username = var.ghcr_username
   ghcr_token    = var.ghcr_token
 
-  # Placeholder tag so the Container Apps + revisions exist before CI ever runs;
-  # the frontend/backend CI/CD workflows immediately overwrite these via `az containerapp update`.
-  frontend_image = "ghcr.io/${var.ghcr_username}/${var.app_name}-frontend:latest"
-  backend_image  = "ghcr.io/${var.ghcr_username}/${var.app_name}-backend:latest"
+  # Public placeholder so the Container Apps + revisions exist before CI has ever pushed a real
+  # image (our CI only ever pushes SHA-tagged images, never :latest, so referencing the real ghcr
+  # image here would create a bootstrap deadlock). The frontend/backend CI/CD workflows overwrite
+  # this via `az containerapp update` on their very next run.
+  frontend_image = "mcr.microsoft.com/k8se/quickstart:latest"
+  backend_image  = "mcr.microsoft.com/k8se/quickstart:latest"
 
   postgres_admin_username = var.postgres_admin_username
   postgres_database_name  = local.database_name
