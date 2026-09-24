@@ -25,11 +25,10 @@ resource "azurerm_resource_group" "main" {
 # --- Shared modules ---------------------------------------------------------
 # In production these `source` values point at a dedicated, versioned
 # `idp-terraform-modules` repo, e.g.:
-#   source = "git::https://github.com/<org>/idp-terraform-modules.git//postgresql?ref=v1.0.0"
 # For this POC they're pinned against this same repo's terraform-modules/ directory.
 
 module "acr" {
-  source              = "git::https://github.com/<org>/idp-poc-backstage.git//terraform-modules/acr?ref=main"
+  source              = "git::https://github.com/${{values.githubOrg}}/idp-poc-backstage.git//terraform-modules/acr?ref=main"
   name                = local.acr_name
   resource_group_name  = azurerm_resource_group.main.name
   location             = azurerm_resource_group.main.location
@@ -37,7 +36,7 @@ module "acr" {
 }
 
 module "keyvault" {
-  source              = "git::https://github.com/<org>/idp-poc-backstage.git//terraform-modules/keyvault?ref=main"
+  source              = "git::https://github.com/${{values.githubOrg}}/idp-poc-backstage.git//terraform-modules/keyvault?ref=main"
   name                = local.key_vault_name
   resource_group_name  = azurerm_resource_group.main.name
   location             = azurerm_resource_group.main.location
@@ -45,7 +44,7 @@ module "keyvault" {
 }
 
 module "postgresql" {
-  source              = "git::https://github.com/<org>/idp-poc-backstage.git//terraform-modules/postgresql?ref=main"
+  source              = "git::https://github.com/${{values.githubOrg}}/idp-poc-backstage.git//terraform-modules/postgresql?ref=main"
   server_name          = local.postgres_server_name
   database_name        = local.database_name
   resource_group_name  = azurerm_resource_group.main.name
@@ -63,7 +62,7 @@ resource "azurerm_key_vault_secret" "db_connection_string" {
 }
 
 module "container_apps" {
-  source              = "git::https://github.com/<org>/idp-poc-backstage.git//terraform-modules/container-apps?ref=main"
+  source              = "git::https://github.com/${{values.githubOrg}}/idp-poc-backstage.git//terraform-modules/container-apps?ref=main"
   environment_name     = local.container_app_env
   resource_group_name  = azurerm_resource_group.main.name
   location             = azurerm_resource_group.main.location

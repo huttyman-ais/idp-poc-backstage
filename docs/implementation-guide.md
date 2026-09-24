@@ -95,7 +95,7 @@ enough for it to appear under **Create** in the Backstage UI.
 
 Already written under [terraform-modules/](../terraform-modules/):
 `postgresql`, `container-apps`, `acr`, `keyvault`. The generated `<app>-infra/main.tf` composes
-them (`source = "git::https://github.com/<org>/idp-terraform-modules.git//postgresql?ref=v1"` in
+them (`source = "git::https://github.com/huttyman-ais/idp-poc-backstage.git//terraform-modules/postgresql?ref=main"` in
 production; for the POC, a relative path or a pinned tag against this repo works fine).
 
 ## 7. Try the golden path end-to-end
