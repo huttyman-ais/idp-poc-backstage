@@ -1,0 +1,92 @@
+# Snippet to merge into your generated backstage-app/app-config.yaml
+# (and app-config.production.yaml for the deployed instance).
+
+app:
+  title: IDP POC
+  baseUrl: ${BACKSTAGE_BASE_URL} # e.g. https://backstage.<aca-env-domain>
+
+backend:
+  baseUrl: ${BACKSTAGE_BASE_URL}
+  listen:
+    port: 7007
+  csp:
+    connect-src: ["'self'", 'http:', 'https:']
+  cors:
+    origin: ${BACKSTAGE_BASE_URL}
+  database:
+    client: pg
+    connection:
+      host: ${POSTGRES_HOST}
+      port: ${POSTGRES_PORT}
+      user: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      ssl:
+        rejectUnauthorized: true
+
+integrations:
+  github:
+    - host: github.com
+      apps:
+        - appId: ${GITHUB_APP_ID}
+          clientId: ${GITHUB_APP_CLIENT_ID}
+          clientSecret: ${GITHUB_APP_CLIENT_SECRET}
+          webhookSecret: ${GITHUB_APP_WEBHOOK_SECRET}
+          privateKey: ${GITHUB_APP_PRIVATE_KEY}
+
+auth:
+  environment: production
+  providers:
+    github:
+      production:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+
+scaffolder:
+  defaultAuthor:
+    name: idp-poc-bot
+  defaultCommitMessage: 'Initial commit from Backstage Scaffolder'
+
+catalog:
+  import:
+    entityFilename: catalog-info.yaml
+    pullRequestBranchName: backstage-integration
+  rules:
+    - allow: [Component, System, API, Resource, Location, Template, Group, User]
+  locations:
+    # Org data: teams/owners used in the "Owner" picker field
+    - type: file
+      target: ../../backstage/catalog/org.yaml
+      rules:
+        - allow: [User, Group]
+    # The Create Application template itself
+    - type: file
+      target: ../../templates/create-application/template.yaml
+      rules:
+        - allow: [Template]
+  # In production, replace the two `file` locations above with GitHub discovery so every
+  # catalog-info.yaml pushed by the Scaffolder into a new repo is picked up automatically:
+  # providers:
+  #   github:
+  #     idpPocOrgProvider:
+  #       organization: '<your-org>'
+  #       catalogPath: '/catalog-info.yaml'
+  #       filters:
+  #         branch: main
+  #       schedule:
+  #         frequency: { minutes: 30 }
+  #         timeout: { minutes: 3 }
+
+techdocs:
+  builder: 'local' # POC: build at request-time; roadmap: 'external' + CI-built docs
+  generator:
+    runIn: 'docker'
+  publisher:
+    type: 'azureBlobStorage'
+    azureBlobStorage:
+      containerName: techdocs
+      credentials:
+        accountName: ${TECHDOCS_STORAGE_ACCOUNT}
+        accountKey: ${TECHDOCS_STORAGE_ACCOUNT_KEY}
+
+permission:
+  enabled: false # MVP: allow-all. Roadmap phase 5 turns this on with RBAC policies.

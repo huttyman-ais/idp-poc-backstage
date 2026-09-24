@@ -1,0 +1,189 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-application
+  title: Create Application
+  description: >-
+    Provisions a full application stack: frontend repo, backend repo, infra repo
+    (Terraform for Postgres + Container Apps), CI/CD, and Catalog registration.
+  tags: [azure, react, nodejs, postgresql, container-apps, terraform]
+spec:
+  owner: platform-team
+  type: application
+
+  parameters:
+    - title: Application details
+      required: [name, teamName, owner, environment]
+      properties:
+        name:
+          title: Application Name
+          type: string
+          description: Lowercase, hyphenated. Used as the prefix for all 3 repos and Azure resources.
+          pattern: '^[a-z][a-z0-9-]{2,30}$'
+          ui:autofocus: true
+        teamName:
+          title: Team Name
+          type: string
+          description: Owning team (must exist as a Group in the Catalog).
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: Group
+        owner:
+          title: Owner
+          type: string
+          description: Individual accountable for this application.
+          ui:field: EntityPicker
+          ui:options:
+            catalogFilter:
+              kind: User
+        environment:
+          title: Environment
+          type: string
+          description: Target environment for the initial deployment.
+          default: dev
+          enum: [dev]
+          enumNames: ['dev (staging/prod: see roadmap)']
+        githubOrg:
+          title: GitHub Organization
+          type: string
+          description: Org the 3 repos will be created under.
+          default: huttyman-ais # personal account behind the current GITHUB_TOKEN; swap for a real org later
+          ui:widget: hidden
+        terraformStateStorageAccount:
+          title: Terraform State Storage Account
+          type: string
+          description: One-time platform setup value (see docs/implementation-guide.md §3).
+          default: stidptfstate0399fb
+          ui:widget: hidden
+
+  steps:
+    - id: fetch-frontend
+      name: Fetch frontend skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton/frontend
+        targetPath: ./frontend
+        copyWithoutRender:
+          - .github/workflows/**
+        values:
+          appName: ${{ parameters.name }}
+          teamName: ${{ parameters.teamName }}
+          owner: ${{ parameters.owner }}
+          environment: ${{ parameters.environment }}
+          githubOrg: ${{ parameters.githubOrg }}
+          destination: ${{ parameters.name }}-frontend
+
+    - id: fetch-backend
+      name: Fetch backend skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton/backend
+        targetPath: ./backend
+        copyWithoutRender:
+          - .github/workflows/**
+        values:
+          appName: ${{ parameters.name }}
+          teamName: ${{ parameters.teamName }}
+          owner: ${{ parameters.owner }}
+          environment: ${{ parameters.environment }}
+          githubOrg: ${{ parameters.githubOrg }}
+          destination: ${{ parameters.name }}-backend
+
+    - id: fetch-infra
+      name: Fetch infra skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton/infra
+        targetPath: ./infra
+        copyWithoutRender:
+          - .github/workflows/**
+        values:
+          appName: ${{ parameters.name }}
+          teamName: ${{ parameters.teamName }}
+          owner: ${{ parameters.owner }}
+          environment: ${{ parameters.environment }}
+          githubOrg: ${{ parameters.githubOrg }}
+          terraformStateStorageAccount: ${{ parameters.terraformStateStorageAccount }}
+          destination: ${{ parameters.name }}-infra
+
+    - id: publish-frontend
+      name: Create frontend repository
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.name }}-frontend&owner=${{ parameters.githubOrg }}
+        description: Frontend for ${{ parameters.name }} (React + TypeScript)
+        repoVisibility: internal
+        defaultBranch: main
+        sourcePath: ./frontend
+        deleteBranchOnMerge: true
+        requiredApprovingReviewCount: 0
+        topics: [idp-poc, frontend, '${{ parameters.name }}']
+
+    - id: publish-backend
+      name: Create backend repository
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.name }}-backend&owner=${{ parameters.githubOrg }}
+        description: Backend API for ${{ parameters.name }} (Node.js + Express)
+        repoVisibility: internal
+        defaultBranch: main
+        sourcePath: ./backend
+        deleteBranchOnMerge: true
+        requiredApprovingReviewCount: 0
+        topics: [idp-poc, backend, '${{ parameters.name }}']
+
+    - id: publish-infra
+      name: Create infra repository
+      action: publish:github
+      input:
+        repoUrl: github.com?repo=${{ parameters.name }}-infra&owner=${{ parameters.githubOrg }}
+        description: Terraform infrastructure for ${{ parameters.name }} (PostgreSQL + Container Apps)
+        repoVisibility: internal
+        defaultBranch: main
+        sourcePath: ./infra
+        deleteBranchOnMerge: true
+        requiredApprovingReviewCount: 0
+        topics: [idp-poc, infra, terraform, '${{ parameters.name }}']
+
+    - id: register-frontend
+      name: Register frontend in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-frontend'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+    - id: register-backend
+      name: Register backend in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-backend'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+    - id: register-infra
+      name: Register infra + system in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps['publish-infra'].output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  output:
+    links:
+      - title: Frontend repository
+        url: ${{ steps['publish-frontend'].output.remoteUrl }}
+      - title: Backend repository
+        url: ${{ steps['publish-backend'].output.remoteUrl }}
+      - title: Infra repository
+        url: ${{ steps['publish-infra'].output.remoteUrl }}
+      - title: Open in Catalog
+        icon: catalog
+        entityRef: ${{ steps['register-infra'].output.entityRef }}
+    text:
+      - title: Next steps
+        content: |
+          The infra repo's `terraform.yaml` workflow will run automatically on this initial
+          commit and provision: Resource Group, PostgreSQL Flexible Server, Container Apps
+          Environment, Container Registry, and Key Vault. Once it completes, the frontend and
+          backend CI/CD workflows will build and deploy to the `${{ parameters.environment }}`
+          Container Apps environment. Track progress via the "View on GitHub Actions" links on
+          each Catalog entity page.

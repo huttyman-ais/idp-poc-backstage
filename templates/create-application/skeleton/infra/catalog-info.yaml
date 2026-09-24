@@ -1,0 +1,41 @@
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: ${{values.appName}}
+  description: Application stack for ${{values.appName}}
+  annotations:
+    github.com/project-slug: ${{values.githubOrg}}/${{values.appName}}-infra
+spec:
+  owner: ${{values.owner}}
+  domain: default
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: ${{values.appName}}-infra
+  description: Terraform-managed Azure infrastructure for ${{values.appName}} (${{values.environment}})
+  annotations:
+    github.com/project-slug: ${{values.githubOrg}}/${{values.appName}}-infra
+    backstage.io/techdocs-ref: dir:.
+  links:
+    - url: https://github.com/${{values.githubOrg}}/${{values.appName}}-infra/actions
+      title: Terraform workflow runs
+      icon: github
+spec:
+  type: infrastructure
+  owner: ${{values.owner}}
+  system: ${{values.appName}}
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: ${{values.appName}}-database
+  description: PostgreSQL Flexible Server database for ${{values.appName}} (${{values.environment}})
+spec:
+  type: database
+  owner: ${{values.owner}}
+  system: ${{values.appName}}
+  dependencyOf:
+    - component:${{values.appName}}-backend

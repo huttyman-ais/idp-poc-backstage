@@ -1,0 +1,79 @@
+# Roadmap version of the per-repo CI/CD workflows: a single reusable workflow called by both
+# <app>-frontend/.github/workflows/ci-cd.yaml and <app>-backend/.github/workflows/ci-cd.yaml
+# instead of duplicating the build/push/deploy steps in every generated repo. Not wired into the
+# POC skeletons yet (see docs/implementation-guide.md roadmap phase 3) — kept here as the target
+# shape once golden-path templates split into composable pieces.
+#
+# Caller repo usage:
+#
+#   jobs:
+#     deploy:
+#       uses: <org>/idp-poc-backstage/.github/workflows/build-and-deploy.yml@main
+#       with:
+#         app-name: myapp
+#         environment: dev
+#         component: frontend            # or: backend
+#         build-args: VITE_API_URL=https://myapp-backend.<domain>
+#       permissions:
+#         id-token: write
+#         contents: read
+
+name: Reusable - build and deploy to Container Apps
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      component:
+        required: true
+        type: string # frontend | backend
+      build-args:
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RESOURCE_GROUP: rg-${{ inputs.app-name }}-${{ inputs.environment }}
+      ACR_NAME: acr${{ inputs.app-name }}${{ inputs.environment }}
+      CONTAINER_APP_NAME: ${{ inputs.app-name }}-${{ inputs.component }}
+      IMAGE_NAME: ${{ inputs.app-name }}-${{ inputs.component }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build and push image
+        run: |
+          IMAGE="${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          BUILD_ARG_FLAGS=""
+          IFS=',' read -ra ARGS <<< "${{ inputs.build-args }}"
+          for arg in "${ARGS[@]}"; do
+            [ -n "$arg" ] && BUILD_ARG_FLAGS="$BUILD_ARG_FLAGS --build-arg $arg"
+          done
+          docker build $BUILD_ARG_FLAGS -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image "$IMAGE"

@@ -1,0 +1,48 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{values.appName}}-backend
+  description: Backend API for ${{values.appName}} (Node.js + Express)
+  annotations:
+    github.com/project-slug: ${{values.githubOrg}}/${{values.appName}}-backend
+    backstage.io/techdocs-ref: dir:.
+  tags: [nodejs, express, backend, api]
+spec:
+  type: service
+  lifecycle: ${{values.environment}}
+  owner: ${{values.owner}}
+  system: ${{values.appName}}
+  providesApis:
+    - ${{values.appName}}-backend-api
+  dependsOn:
+    - resource:${{values.appName}}-database
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: ${{values.appName}}-backend-api
+  description: REST API for ${{values.appName}}
+spec:
+  type: openapi
+  lifecycle: ${{values.environment}}
+  owner: ${{values.owner}}
+  system: ${{values.appName}}
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: ${{values.appName}} API
+      version: '0.1.0'
+    paths:
+      /health:
+        get:
+          summary: Health check
+          responses:
+            '200':
+              description: OK
+      /api/items:
+        get:
+          summary: List items
+          responses:
+            '200':
+              description: OK

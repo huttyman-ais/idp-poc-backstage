@@ -1,0 +1,16 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{values.appName}}-frontend
+  description: Frontend for ${{values.appName}} (React + TypeScript)
+  annotations:
+    github.com/project-slug: ${{values.githubOrg}}/${{values.appName}}-frontend
+    backstage.io/techdocs-ref: dir:.
+  tags: [react, typescript, frontend]
+spec:
+  type: website
+  lifecycle: ${{values.environment}}
+  owner: ${{values.owner}}
+  system: ${{values.appName}}
+  consumesApis:
+    - ${{values.appName}}-backend-api

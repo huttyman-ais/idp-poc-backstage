@@ -1,0 +1,6 @@
+backstage-app/
+poc-cluade/
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
