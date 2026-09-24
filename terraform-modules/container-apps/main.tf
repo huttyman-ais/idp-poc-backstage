@@ -11,6 +11,7 @@ resource "azurerm_container_app_environment" "this" {
   name                       = var.environment_name
   resource_group_name        = var.resource_group_name
   location                   = var.location
+  logs_destination           = "log-analytics" # required by azurerm v5+ when log_analytics_workspace_id is set
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   tags                       = var.tags
   # No custom VNet for the POC — Azure provisions a managed one automatically.
