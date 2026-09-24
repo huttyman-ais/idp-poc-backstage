@@ -11,32 +11,116 @@ resource "azurerm_container_app_environment" "this" {
   name                       = var.environment_name
   resource_group_name        = var.resource_group_name
   location                   = var.location
-  logs_destination           = "log-analytics" # required by azurerm v5+ when log_analytics_workspace_id is set
+  logs_destination           = "log-analytics"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
   tags                       = var.tags
   # No custom VNet for the POC — Azure provisions a managed one automatically.
   # Roadmap phase 1: set infrastructure_subnet_id to a delegated subnet for private networking.
 }
 
-# One identity shared by both apps: pull from ACR, read secrets from Key Vault.
-resource "azurerm_user_assigned_identity" "apps" {
-  name                = "mi-${var.app_name}"
-  resource_group_name = var.resource_group_name
-  location            = var.location
-  tags                = var.tags
+# --- Lightweight demo Postgres: a container, not a managed PaaS service ---------------------
+# Swaps out for terraform-modules/postgresql (Flexible Server) in subscriptions whose policy
+# allows it. Persisted via an Azure Files share mounted into the Container Apps Environment.
+
+resource "random_password" "postgres_admin" {
+  length           = 24
+  special          = true
+  min_upper        = 2
+  min_lower        = 2
+  min_numeric      = 2
+  min_special      = 2
+  override_special = "-_"
 }
 
-resource "azurerm_role_assignment" "acr_pull" {
-  scope                = var.acr_id
-  role_definition_name = "AcrPull"
-  principal_id         = azurerm_user_assigned_identity.apps.principal_id
+resource "azurerm_storage_account" "postgres_data" {
+  name                     = substr("st${replace(var.app_name, "-", "")}pgdata", 0, 24)
+  resource_group_name      = var.resource_group_name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  tags                     = var.tags
 }
 
-resource "azurerm_role_assignment" "kv_secrets_user" {
-  scope                = var.key_vault_id
-  role_definition_name = "Key Vault Secrets User"
-  principal_id         = azurerm_user_assigned_identity.apps.principal_id
+resource "azurerm_storage_share" "postgres_data" {
+  name               = "postgres-data"
+  storage_account_id = azurerm_storage_account.postgres_data.id
+  quota              = 10
 }
+
+resource "azurerm_container_app_environment_storage" "postgres_data" {
+  name                         = "postgres-data"
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  account_name                 = azurerm_storage_account.postgres_data.name
+  share_name                   = azurerm_storage_share.postgres_data.name
+  access_key                   = azurerm_storage_account.postgres_data.primary_access_key
+  access_mode                  = "ReadWrite"
+}
+
+resource "azurerm_container_app" "postgres" {
+  name                         = "${var.app_name}-postgres"
+  container_app_environment_id = azurerm_container_app_environment.this.id
+  resource_group_name          = var.resource_group_name
+  revision_mode                = "Single"
+  tags                         = var.tags
+
+  secret {
+    name  = "postgres-admin-password"
+    value = random_password.postgres_admin.result
+  }
+
+  template {
+    min_replicas = 1 # no scale-to-zero for the stateful DB
+    max_replicas = 1
+    container {
+      name   = "postgres"
+      image  = "postgres:16-alpine"
+      cpu    = 0.5
+      memory = "1Gi"
+      env {
+        name  = "POSTGRES_USER"
+        value = var.postgres_admin_username
+      }
+      env {
+        name        = "POSTGRES_PASSWORD"
+        secret_name = "postgres-admin-password"
+      }
+      env {
+        name  = "POSTGRES_DB"
+        value = var.postgres_database_name
+      }
+      env {
+        name  = "PGDATA"
+        value = "/var/lib/postgresql/data/pgdata"
+      }
+      volume_mounts {
+        name = "postgres-data"
+        path = "/var/lib/postgresql/data"
+      }
+    }
+    volume {
+      name         = "postgres-data"
+      storage_type = "AzureFile"
+      storage_name = azurerm_container_app_environment_storage.postgres_data.name
+    }
+  }
+
+  ingress {
+    external_enabled = false
+    target_port      = 5432
+    transport        = "tcp"
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+}
+
+locals {
+  postgres_host = "${azurerm_container_app.postgres.name}.internal.${azurerm_container_app_environment.this.default_domain}"
+  database_url  = "postgresql://${var.postgres_admin_username}:${random_password.postgres_admin.result}@${local.postgres_host}:5432/${var.postgres_database_name}?sslmode=disable"
+}
+
+# --- Frontend / backend apps, pulling from GitHub Container Registry -------------------------
 
 resource "azurerm_container_app" "backend" {
   name                         = "${var.app_name}-backend"
@@ -45,18 +129,23 @@ resource "azurerm_container_app" "backend" {
   revision_mode                = "Single"
   tags                         = var.tags
 
-  identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.apps.id]
+  secret {
+    name  = "ghcr-token"
+    value = var.ghcr_token
+  }
+  secret {
+    name  = "database-url"
+    value = local.database_url
   }
 
   registry {
-    server   = var.acr_login_server
-    identity = azurerm_user_assigned_identity.apps.id
+    server               = "ghcr.io"
+    username             = var.ghcr_username
+    password_secret_name = "ghcr-token"
   }
 
   template {
-    min_replicas = 0 # scale-to-zero keeps POC cost near-zero when idle
+    min_replicas = 0 # scale-to-zero is safe here: ghcr pull credential is a durable PAT, not a job-scoped token
     max_replicas = 2
     container {
       name   = "backend"
@@ -64,8 +153,8 @@ resource "azurerm_container_app" "backend" {
       cpu    = 0.5
       memory = "1Gi"
       env {
-        name  = "KEY_VAULT_URL"
-        value = var.key_vault_uri
+        name        = "DATABASE_URL"
+        secret_name = "database-url"
       }
       env {
         name  = "PORT"
@@ -84,7 +173,7 @@ resource "azurerm_container_app" "backend" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.acr_pull, azurerm_role_assignment.kv_secrets_user]
+  depends_on = [azurerm_container_app.postgres]
 }
 
 resource "azurerm_container_app" "frontend" {
@@ -94,14 +183,15 @@ resource "azurerm_container_app" "frontend" {
   revision_mode                = "Single"
   tags                         = var.tags
 
-  identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.apps.id]
+  secret {
+    name  = "ghcr-token"
+    value = var.ghcr_token
   }
 
   registry {
-    server   = var.acr_login_server
-    identity = azurerm_user_assigned_identity.apps.id
+    server               = "ghcr.io"
+    username             = var.ghcr_username
+    password_secret_name = "ghcr-token"
   }
 
   template {
@@ -124,6 +214,4 @@ resource "azurerm_container_app" "frontend" {
       percentage      = 100
     }
   }
-
-  depends_on = [azurerm_role_assignment.acr_pull]
 }

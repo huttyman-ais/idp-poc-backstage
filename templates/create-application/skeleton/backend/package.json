@@ -11,8 +11,6 @@
     "test": "jest"
   },
   "dependencies": {
-    "@azure/identity": "^4.4.1",
-    "@azure/keyvault-secrets": "^4.8.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "pg": "^8.12.0"

@@ -2,20 +2,12 @@ output "resource_group_name" {
   value = azurerm_resource_group.main.name
 }
 
-output "acr_login_server" {
-  value = module.acr.login_server
-}
-
-output "postgres_fqdn" {
-  value = module.postgresql.fqdn
-}
-
 output "database_name" {
   value = local.database_name
 }
 
-output "key_vault_uri" {
-  value = module.keyvault.vault_uri
+output "postgres_internal_host" {
+  value = module.container_apps.postgres_internal_host
 }
 
 output "frontend_url" {

@@ -29,5 +29,17 @@ variable "team_name" {
 variable "postgres_admin_username" {
   type        = string
   default     = "pgadmin"
-  description = "Postgres admin login. Password is generated randomly and stored only in Key Vault."
+  description = "Postgres admin login. Password is generated randomly and stored only as a Container App secret."
+}
+
+variable "ghcr_username" {
+  type        = string
+  default     = "${{values.githubOrg}}"
+  description = "GitHub owner whose Container Registry (ghcr.io) hosts the frontend/backend images."
+}
+
+variable "ghcr_token" {
+  type        = string
+  sensitive   = true
+  description = "GitHub PAT with read:packages, used as the ghcr.io pull credential. Set via TF_VAR_ghcr_token in CI (see terraform.yaml) — never given a default."
 }

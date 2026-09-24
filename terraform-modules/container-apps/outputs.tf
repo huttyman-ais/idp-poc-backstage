@@ -6,6 +6,6 @@ output "backend_fqdn" {
   value = azurerm_container_app.backend.ingress[0].fqdn
 }
 
-output "identity_principal_id" {
-  value = azurerm_user_assigned_identity.apps.principal_id
+output "postgres_internal_host" {
+  value = local.postgres_host
 }
