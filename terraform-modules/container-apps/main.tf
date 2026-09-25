@@ -20,7 +20,10 @@ resource "azurerm_container_app_environment" "this" {
 
 # --- Lightweight demo Postgres: a container, not a managed PaaS service ---------------------
 # Swaps out for terraform-modules/postgresql (Flexible Server) in subscriptions whose policy
-# allows it. Persisted via an Azure Files share mounted into the Container Apps Environment.
+# allows it. Runs on the container's own ephemeral disk — data does NOT survive a restart.
+# Azure Files (SMB) was tried first but Postgres's initdb needs POSIX chmod/chown semantics
+# that SMB-backed shares don't support ("Operation not permitted"); proper persistence would
+# need Premium NFS-backed file shares, which is real scope/cost beyond a lightweight demo.
 
 resource "random_password" "postgres_admin" {
   length           = 24
@@ -30,30 +33,6 @@ resource "random_password" "postgres_admin" {
   min_numeric      = 2
   min_special      = 2
   override_special = "-_"
-}
-
-resource "azurerm_storage_account" "postgres_data" {
-  name                     = substr("st${replace(var.app_name, "-", "")}pgdata", 0, 24)
-  resource_group_name      = var.resource_group_name
-  location                 = var.location
-  account_tier             = "Standard"
-  account_replication_type = "LRS"
-  tags                     = var.tags
-}
-
-resource "azurerm_storage_share" "postgres_data" {
-  name               = "postgres-data"
-  storage_account_id = azurerm_storage_account.postgres_data.id
-  quota              = 10
-}
-
-resource "azurerm_container_app_environment_storage" "postgres_data" {
-  name                         = "postgres-data"
-  container_app_environment_id = azurerm_container_app_environment.this.id
-  account_name                 = azurerm_storage_account.postgres_data.name
-  share_name                   = azurerm_storage_share.postgres_data.name
-  access_key                   = azurerm_storage_account.postgres_data.primary_access_key
-  access_mode                  = "ReadWrite"
 }
 
 resource "azurerm_container_app" "postgres" {
@@ -88,19 +67,6 @@ resource "azurerm_container_app" "postgres" {
         name  = "POSTGRES_DB"
         value = var.postgres_database_name
       }
-      env {
-        name  = "PGDATA"
-        value = "/var/lib/postgresql/data/pgdata"
-      }
-      volume_mounts {
-        name = "postgres-data"
-        path = "/var/lib/postgresql/data"
-      }
-    }
-    volume {
-      name         = "postgres-data"
-      storage_type = "AzureFile"
-      storage_name = azurerm_container_app_environment_storage.postgres_data.name
     }
   }
 
