@@ -139,6 +139,12 @@ resource "azurerm_container_app" "backend" {
     }
   }
 
+  # CI (ci-cd.yaml) owns the image after the first deploy via `az containerapp update`; without
+  # this, every unrelated terraform apply would silently revert it back to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
+  }
+
   depends_on = [azurerm_container_app.postgres]
 }
 
@@ -179,5 +185,11 @@ resource "azurerm_container_app" "frontend" {
       latest_revision = true
       percentage      = 100
     }
+  }
+
+  # CI (ci-cd.yaml) owns the image after the first deploy via `az containerapp update`; without
+  # this, every unrelated terraform apply would silently revert it back to the placeholder.
+  lifecycle {
+    ignore_changes = [template[0].container[0].image]
   }
 }
