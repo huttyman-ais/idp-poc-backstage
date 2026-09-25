@@ -7,5 +7,5 @@ output "backend_fqdn" {
 }
 
 output "postgres_internal_host" {
-  value = local.postgres_host
+  value = "localhost (sidecar container in the backend Container App)"
 }

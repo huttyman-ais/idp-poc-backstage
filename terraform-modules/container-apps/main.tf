@@ -18,12 +18,20 @@ resource "azurerm_container_app_environment" "this" {
   # Roadmap phase 1: set infrastructure_subnet_id to a delegated subnet for private networking.
 }
 
-# --- Lightweight demo Postgres: a container, not a managed PaaS service ---------------------
+# --- Lightweight demo Postgres: a sidecar container in the backend's own Container App -------
 # Swaps out for terraform-modules/postgresql (Flexible Server) in subscriptions whose policy
-# allows it. Runs on the container's own ephemeral disk — data does NOT survive a restart.
-# Azure Files (SMB) was tried first but Postgres's initdb needs POSIX chmod/chown semantics
-# that SMB-backed shares don't support ("Operation not permitted"); proper persistence would
-# need Premium NFS-backed file shares, which is real scope/cost beyond a lightweight demo.
+# allows it. Runs on ephemeral disk — data does NOT survive a restart.
+#
+# This started as its own Container App reached over internal TCP ingress
+# (app-test-postgres.internal.<domain>:5432), but that consistently timed out connecting to the
+# platform's internal load-balancer VIP in this environment (a Consumption-only environment with
+# no custom VNet) — a networking behavior outside what's diagnosable/fixable from inside the
+# subscription. Running it as a second container in the *same* Container App as backend sidesteps
+# inter-app ingress entirely: sidecar containers share one pod's network namespace, so backend
+# reaches it at localhost instead of through any Container Apps routing layer.
+# Azure Files (SMB) was tried first for persistence but Postgres's initdb needs POSIX chmod/chown
+# semantics that SMB-backed shares don't support ("Operation not permitted"); proper persistence
+# would need Premium NFS-backed file shares, real scope/cost beyond a lightweight demo.
 
 resource "random_password" "postgres_admin" {
   length           = 24
@@ -35,55 +43,8 @@ resource "random_password" "postgres_admin" {
   override_special = "-_"
 }
 
-resource "azurerm_container_app" "postgres" {
-  name                         = "${var.app_name}-postgres"
-  container_app_environment_id = azurerm_container_app_environment.this.id
-  resource_group_name          = var.resource_group_name
-  revision_mode                = "Single"
-  tags                         = var.tags
-
-  secret {
-    name  = "postgres-admin-password"
-    value = random_password.postgres_admin.result
-  }
-
-  template {
-    min_replicas = 1 # no scale-to-zero for the stateful DB
-    max_replicas = 1
-    container {
-      name   = "postgres"
-      image  = "postgres:16-alpine"
-      cpu    = 0.5
-      memory = "1Gi"
-      env {
-        name  = "POSTGRES_USER"
-        value = var.postgres_admin_username
-      }
-      env {
-        name        = "POSTGRES_PASSWORD"
-        secret_name = "postgres-admin-password"
-      }
-      env {
-        name  = "POSTGRES_DB"
-        value = var.postgres_database_name
-      }
-    }
-  }
-
-  ingress {
-    external_enabled = false
-    target_port      = 5432
-    transport        = "tcp"
-    traffic_weight {
-      latest_revision = true
-      percentage      = 100
-    }
-  }
-}
-
 locals {
-  postgres_host = "${azurerm_container_app.postgres.name}.internal.${azurerm_container_app_environment.this.default_domain}"
-  database_url  = "postgresql://${var.postgres_admin_username}:${random_password.postgres_admin.result}@${local.postgres_host}:5432/${var.postgres_database_name}?sslmode=disable"
+  database_url = "postgresql://${var.postgres_admin_username}:${random_password.postgres_admin.result}@localhost:5432/${var.postgres_database_name}?sslmode=disable"
 }
 
 # --- Frontend / backend apps, pulling from GitHub Container Registry -------------------------
@@ -102,6 +63,10 @@ resource "azurerm_container_app" "backend" {
   secret {
     name  = "database-url"
     value = local.database_url
+  }
+  secret {
+    name  = "postgres-admin-password"
+    value = random_password.postgres_admin.result
   }
 
   registry {
@@ -127,6 +92,25 @@ resource "azurerm_container_app" "backend" {
         value = "3001"
       }
     }
+    # Postgres as a sidecar in the same pod — see the comment above local.database_url for why.
+    container {
+      name   = "postgres"
+      image  = "postgres:16-alpine"
+      cpu    = 0.5
+      memory = "1Gi"
+      env {
+        name  = "POSTGRES_USER"
+        value = var.postgres_admin_username
+      }
+      env {
+        name        = "POSTGRES_PASSWORD"
+        secret_name = "postgres-admin-password"
+      }
+      env {
+        name  = "POSTGRES_DB"
+        value = var.postgres_database_name
+      }
+    }
   }
 
   ingress {
@@ -139,13 +123,11 @@ resource "azurerm_container_app" "backend" {
     }
   }
 
-  # CI (ci-cd.yaml) owns the image after the first deploy via `az containerapp update`; without
-  # this, every unrelated terraform apply would silently revert it back to the placeholder.
+  # CI (ci-cd.yaml) owns the backend image after the first deploy via `az containerapp update`;
+  # without this, every unrelated terraform apply would silently revert it back to the placeholder.
   lifecycle {
     ignore_changes = [template[0].container[0].image]
   }
-
-  depends_on = [azurerm_container_app.postgres]
 }
 
 resource "azurerm_container_app" "frontend" {
